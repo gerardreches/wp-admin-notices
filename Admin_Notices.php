@@ -8,49 +8,68 @@ namespace Platonic\Admin;
  * @package Platonic\Admin
  * @author Gerard Reches
  */
-class Admin_Notices {
+final class Admin_Notices {
 
 	public const ERROR = 'error';
 	public const WARNING = 'warning';
 	public const SUCCESS = 'success';
 	public const INFO = 'info';
 
-	protected static string $transient_name;
+	private const TRANSIENT_NAME = 'platonic_admin_notices';
 
 	/**
-	 * @param string $transient_name
+	 * Admin_Notices constructor.
+	 *
+	 * @access private
+	 *
+	 * @note This class should not be instantiated. Hence, the constructor is private.
 	 */
-	public static function initialize( string $transient_name = 'admin_notices' ): void {
-
-		if ( has_action( 'admin_notices', array( static::class, 'display' ) ) ) {
-			_doing_it_wrong( __METHOD__, sprintf( __( 'Class %s has already been initialized.' ), static::class ), '3.1.0' );
-
-			return;
-		}
-
-		if ( ! is_string( $transient_name ) ) {
-			_doing_it_wrong( __METHOD__, sprintf( __( '%s must be a valid string.' ), '$transient_name' ), '2.8.0' );
-
-			return;
-		}
-
-		if ( strlen( $transient_name ) > 172 ) {
-			_doing_it_wrong( __METHOD__, sprintf( __( '%s must be 172 characters or fewer in length.' ), '$transient_name' ), '4.4' );
-
-			return;
-		}
-
-		static::$transient_name = $transient_name;
-
-		add_action( 'admin_notices', array( static::class, 'display' ) );
-
-		add_action( 'admin_enqueue_scripts', array( static::class, 'admin_enqueue_scripts' ) );
-
-		add_action( 'wp_ajax_dismiss_admin_notice', array( static::class, 'dismiss' ) );
-		add_action( 'wp_ajax_nopriv_dismiss_admin_notice', array( static::class, 'dismiss' ) );
+	private function __construct() {
 	}
 
-	public static function admin_enqueue_scripts() {
+	public static function is_initialized(): bool {
+		return apply_filters( 'is_platonic_admin_notices_initialized', false );
+	}
+
+	/**
+	 * Initialize the class.
+	 *
+	 * @return void
+	 */
+	public static function initialize(): void {
+
+		if ( self::is_initialized() ) {
+			_doing_it_wrong( __METHOD__, sprintf( __( 'Class %s has already been initialized.' ), self::class ), '3.1.0' );
+
+			return;
+		}
+
+		add_action( 'admin_notices', array( self::class, 'admin_notices_hook' ) );
+
+		add_action( 'admin_enqueue_scripts', array( self::class, 'admin_enqueue_scripts_hook' ) );
+
+		add_action( 'wp_ajax_dismiss_admin_notice', array( self::class, 'wp_ajax_dismiss_admin_notice_hook' ) );
+		add_action( 'wp_ajax_nopriv_dismiss_admin_notice', array( self::class, 'wp_ajax_dismiss_admin_notice_hook' ) );
+
+		add_filter( 'is_platonic_admin_notices_initialized', '__return_true' );
+	}
+
+	/**
+	 * Display admin notices and remove non-persistent ones.
+	 *
+	 * @return void
+	 */
+	public static function admin_notices_hook(): void {
+		self::display();
+		self::remove_all_non_persistent();
+	}
+
+	/**
+	 * Enqueue scripts for admin notices.
+	 *
+	 * @return void
+	 */
+	public static function admin_enqueue_scripts_hook(): void {
 		wp_enqueue_script( 'jquery' );
 
 		$ajax_url   = admin_url( 'admin-ajax.php' );
@@ -80,12 +99,30 @@ class Admin_Notices {
 		);
 	}
 
-	public static function dismiss(): void {
+	/**
+	 * Dismiss an admin notice.
+	 *
+	 * @return void
+	 *
+	 * @note This method should only be called via AJAX.
+	 */
+	public static function wp_ajax_dismiss_admin_notice_hook(): void {
+
+		if ( ! wp_doing_ajax() ) {
+			_doing_it_wrong( __METHOD__, __( 'This method should only be called via AJAX.' ), '1.0.0' );
+
+			return;
+		}
+
 		// Generates 403 error code if not met.
 		check_ajax_referer( 'dismiss_admin_notice_nonce' );
 
-		$code    = wp_unslash( $_POST['code'] );
-		$removed = static::remove( $code );
+		$code = wp_unslash( $_POST['code'] );
+
+		if ( ! is_string( $code ) || empty( $code ) ) {
+			wp_send_json_error( 'Invalid code.' );
+		}
+		$removed = self::remove( $code );
 
 		if ( $removed ) {
 			wp_send_json_success( "Notice {$code} dismissed." );
@@ -107,7 +144,7 @@ class Admin_Notices {
 	 * @return void
 	 */
 	public static function add_error( string $message, bool $dismissible = false, bool $unique = false, bool $persistent = false, string $code = null, bool $log = false ): void {
-		static::add( self::ERROR, $message, $dismissible, $unique, $persistent, $code, $log );
+		self::add( self::ERROR, $message, $dismissible, $unique, $persistent, $code, $log );
 	}
 
 	/**
@@ -123,7 +160,7 @@ class Admin_Notices {
 	 * @return void
 	 */
 	public static function add_warning( string $message, bool $dismissible = false, bool $unique = false, bool $persistent = false, string $code = null, bool $log = false ): void {
-		static::add( self::WARNING, $message, $dismissible, $unique, $persistent, $code, $log );
+		self::add( self::WARNING, $message, $dismissible, $unique, $persistent, $code, $log );
 	}
 
 	/**
@@ -139,7 +176,7 @@ class Admin_Notices {
 	 * @return void
 	 */
 	public static function add_success( string $message, bool $dismissible = false, bool $unique = false, bool $persistent = false, string $code = null, bool $log = false ): void {
-		static::add( self::SUCCESS, $message, $dismissible, $unique, $persistent, $code, $log );
+		self::add( self::SUCCESS, $message, $dismissible, $unique, $persistent, $code, $log );
 	}
 
 	/**
@@ -155,7 +192,7 @@ class Admin_Notices {
 	 * @return void
 	 */
 	public static function add_info( string $message, bool $dismissible = false, bool $unique = false, bool $persistent = false, string $code = null, bool $log = false ): void {
-		static::add( self::INFO, $message, $dismissible, $unique, $persistent, $code, $log );
+		self::add( self::INFO, $message, $dismissible, $unique, $persistent, $code, $log );
 	}
 
 	/**
@@ -170,7 +207,7 @@ class Admin_Notices {
 	 * @return void
 	 */
 	public static function add_persistent_error( ?string $code, string $message, bool $dismissible = true, bool $unique = true, bool $log = false ): void {
-		static::add_persistent( self::ERROR, $code, $message, $dismissible, $unique, $log );
+		self::add_persistent( self::ERROR, $code, $message, $dismissible, $unique, $log );
 	}
 
 	/**
@@ -185,7 +222,7 @@ class Admin_Notices {
 	 * @return void
 	 */
 	public static function add_persistent_warning( ?string $code, string $message, bool $dismissible = true, bool $unique = true, bool $log = false ): void {
-		static::add_persistent( self::WARNING, $code, $message, $dismissible, $unique, $log );
+		self::add_persistent( self::WARNING, $code, $message, $dismissible, $unique, $log );
 	}
 
 	/**
@@ -200,7 +237,7 @@ class Admin_Notices {
 	 * @return void
 	 */
 	public static function add_persistent_success( ?string $code, string $message, bool $dismissible = true, bool $unique = true, bool $log = false ): void {
-		static::add_persistent( self::SUCCESS, $code, $message, $dismissible, $unique, $log );
+		self::add_persistent( self::SUCCESS, $code, $message, $dismissible, $unique, $log );
 	}
 
 	/**
@@ -215,7 +252,7 @@ class Admin_Notices {
 	 * @return void
 	 */
 	public static function add_persistent_info( ?string $code, string $message, bool $dismissible = true, bool $unique = true, bool $log = false ): void {
-		static::add_persistent( self::INFO, $code, $message, $dismissible, $unique, $log );
+		self::add_persistent( self::INFO, $code, $message, $dismissible, $unique, $log );
 	}
 
 	/**
@@ -231,7 +268,7 @@ class Admin_Notices {
 	 * @return void
 	 */
 	public static function add_persistent( string $type, ?string $code, string $message, bool $dismissible = true, bool $unique = true, bool $log = false ): void {
-		static::add( $type, $message, $dismissible, $unique, true, $code, $log );
+		self::add( $type, $message, $dismissible, $unique, true, $code, $log );
 	}
 
 	/**
@@ -273,7 +310,7 @@ class Admin_Notices {
 			return;
 		}
 
-		$notices = get_transient( static::$transient_name );
+		$notices = get_transient( self::TRANSIENT_NAME );
 
 		if ( false === $notices ) {
 			$notices = array();
@@ -298,7 +335,7 @@ class Admin_Notices {
 			'code'        => $code,
 		);
 
-		set_transient( static::$transient_name, $notices );
+		set_transient( self::TRANSIENT_NAME, $notices );
 
 		if ( $log ) {
 			error_log( sprintf( '%s: %s', strtoupper( $type ), $message ) );
@@ -310,20 +347,29 @@ class Admin_Notices {
 	 *
 	 * @param string $code
 	 *
-	 * @return void
+	 * @return bool
 	 */
 	public static function remove( string $code ): bool {
-		$notices = get_transient( static::$transient_name );
-
-		if ( false === $notices ) {
+		if ( empty( $notices = get_transient( self::TRANSIENT_NAME ) ) ) {
 			return false;
 		}
 
-		$notices = array_filter( $notices, function ( $notice ) use ( $code ) {
+		return set_transient( self::TRANSIENT_NAME, array_filter( $notices, function ( $notice ) use ( $code ) {
 			return $notice['code'] !== $code;
-		} );
+		} ) );
+	}
 
-		return set_transient( static::$transient_name, $notices );
+	/**
+	 * Remove non-persistent notices.
+	 *
+	 * @return void
+	 */
+	private static function remove_all_non_persistent(): void {
+		if ( ! empty( $notices = get_transient( self::TRANSIENT_NAME ) ) ) {
+			set_transient( self::TRANSIENT_NAME, array_filter( $notices, function ( $notice ) {
+				return $notice['persistent'];
+			} ) );
+		}
 	}
 
 	/**
@@ -331,34 +377,16 @@ class Admin_Notices {
 	 *
 	 * @return void
 	 */
-	public static function display(): void {
-		// Retrieve notices
-		$notices = get_transient( static::$transient_name );
-
-		// Display notices
-		if ( ! empty( $notices ) ) {
+	private static function display(): void {
+		if ( ! empty( $notices = get_transient( self::TRANSIENT_NAME ) ) ) {
 			foreach ( $notices as $notice ) {
 				$classes = "notice notice-{$notice['type']}";
 				if ( $notice['dismissible'] ) {
 					$classes .= ' is-dismissible';
 				}
-
 				echo "<div data-notice-type='{$notice['type']}' data-notice-dismissible='{$notice['dismissible']}' data-notice-code='{$notice['code']}' class='{$classes}'><p>{$notice['message']}</p></div>";
 			}
 		}
-
-		// Clear notices
-		set_transient( static::$transient_name, array_filter( $notices, function ( $notice ) {
-			return $notice['persistent'];
-		} ) );
 	}
 
-	/**
-	 * Handles my AJAX request.
-	 */
-	public static function my_ajax_handler() {
-		// Handle the ajax request here
-
-		wp_die(); // All ajax handlers die when finished
-	}
 }
